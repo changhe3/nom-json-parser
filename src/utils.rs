@@ -1,13 +1,17 @@
-use regex::{Replacer, Regex, Captures};
-use std::borrow::Cow;
-use std::fmt::{Display, Debug, Formatter, Error, Write};
 use lazy_static::lazy_static;
-
+use regex::{Captures, Regex, Replacer};
+use std::borrow::Cow;
+use std::fmt::{Debug, Display, Error, Formatter, Write};
 
 pub(crate) trait RegexExt {
     fn cow_replace<'t, R: Replacer>(&self, text: Cow<'t, str>, rep: R) -> Cow<'t, str>;
     fn cow_replace_all<'t, R: Replacer>(&self, text: Cow<'t, str>, rep: R) -> Cow<'t, str>;
-    fn cow_replacen<'t, R: Replacer>(&self, text: Cow<'t, str>, limit: usize, rep: R) -> Cow<'t, str>;
+    fn cow_replacen<'t, R: Replacer>(
+        &self,
+        text: Cow<'t, str>,
+        limit: usize,
+        rep: R,
+    ) -> Cow<'t, str>;
 }
 
 impl RegexExt for Regex {
@@ -25,7 +29,12 @@ impl RegexExt for Regex {
         }
     }
 
-    fn cow_replacen<'t, R: Replacer>(&self, text: Cow<'t, str>, limit: usize, rep: R) -> Cow<'t, str> {
+    fn cow_replacen<'t, R: Replacer>(
+        &self,
+        text: Cow<'t, str>,
+        limit: usize,
+        rep: R,
+    ) -> Cow<'t, str> {
         match text {
             Cow::Borrowed(borrowed) => self.replacen(borrowed, limit, rep),
             Cow::Owned(owned) => self.replacen(&owned, limit, rep).into_owned().into(),

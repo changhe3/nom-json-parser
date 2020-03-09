@@ -1,9 +1,9 @@
-mod repr;
 mod parser;
+mod repr;
 mod utils;
 
-pub use repr::{Json, JsonValue};
 pub use parser::parse;
+pub use repr::{Json, JsonValue};
 
 #[cfg(test)]
 mod tests {

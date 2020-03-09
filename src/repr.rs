@@ -1,4 +1,4 @@
-use crate::utils::{escape, DisplayAsDeBug, PadAdapter};
+use crate::utils::{escape, PadAdapter};
 
 use derive_more::From as DmFrom;
 use itertools::Itertools;
@@ -112,9 +112,9 @@ impl Display for JsonValue<'_> {
                     f.into_inner().write_str("\n}")?;
                 } else {
                     f.write_str("{")?;
-                    let formatter = obj
-                        .iter()
-                        .format_with(", ", |(k, v), f| f(&format_args!("\"{}\": {}", escape(k), v)));
+                    let formatter = obj.iter().format_with(", ", |(k, v), f| {
+                        f(&format_args!("\"{}\": {}", escape(k), v))
+                    });
                     f.write_fmt(format_args!("{}", formatter))?;
                     f.write_str("}")?;
                 };
@@ -123,7 +123,9 @@ impl Display for JsonValue<'_> {
                 if f.alternate() {
                     let mut f: PadAdapter = f.into();
                     f.write_str("[\n")?;
-                    let formatter = arr.iter().format_with(",\n", |elem, f| f(&format_args!("{:#}", elem)));
+                    let formatter = arr
+                        .iter()
+                        .format_with(",\n", |elem, f| f(&format_args!("{:#}", elem)));
                     f.write_fmt(format_args!("{}", formatter))?;
                     f.into_inner().write_str("\n]")?;
                 } else {

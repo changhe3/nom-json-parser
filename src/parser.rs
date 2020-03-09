@@ -1,7 +1,7 @@
 use crate::repr::{Json, JsonValue};
 use nom::branch::alt;
-use nom::character::complete::*;
 use nom::bytes::complete::*;
+use nom::character::complete::*;
 use nom::combinator::*;
 use nom::error::ParseError;
 use nom::sequence::*;
