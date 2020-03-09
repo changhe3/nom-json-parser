@@ -97,3 +97,9 @@ impl<'a, 'b: 'a> Write for PadAdapter<'a, 'b> {
         Ok(())
     }
 }
+
+impl<'a, 'b: 'a> PadAdapter<'a, 'b> {
+    pub fn into_inner(self) -> &'a mut Formatter<'b> {
+        self.fmt
+    }
+}

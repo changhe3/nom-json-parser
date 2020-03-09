@@ -1,12 +1,13 @@
-use crate::utils::{DisplayAsDeBug, escape};
+use crate::utils::{escape, DisplayAsDeBug, PadAdapter};
 
 use derive_more::From as DmFrom;
-use std::collections::BTreeMap;
-use std::fmt::{Error, Formatter};
-use std::iter::FromIterator;
+use itertools::Itertools;
 use shrinkwraprs::Shrinkwrap;
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fmt::Display;
+use std::fmt::{Error, Formatter, Write};
+use std::iter::FromIterator;
 
 #[derive(Shrinkwrap, PartialEq, Clone, DmFrom)]
 pub struct Json<'a>(Option<JsonValue<'a>>);
@@ -83,8 +84,6 @@ impl<'a, T: Into<Json<'a>>> From<Vec<T>> for JsonValue<'a> {
     }
 }
 
-
-
 impl Display for JsonValue<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
         match self {
@@ -103,19 +102,35 @@ impl Display for JsonValue<'_> {
                 f.write_str(&boolean.to_string())?;
             }
             JsonValue::Object(obj) => {
-                f.debug_map()
-                    .entries(obj.iter().map(|(k, v)| {
-                        (
-                            DisplayAsDeBug(JsonValue::from(k.as_ref())),
-                            DisplayAsDeBug(v),
-                        )
-                    }))
-                    .finish()?;
+                if f.alternate() {
+                    let mut f: PadAdapter = f.into();
+                    f.write_str("{\n")?;
+                    let formatter = obj.iter().format_with(",\n", |(k, v), f| {
+                        f(&format_args!("\"{:#}\": {:#}", escape(k), v))
+                    });
+                    f.write_fmt(format_args!("{}", formatter))?;
+                    f.into_inner().write_str("\n}")?;
+                } else {
+                    f.write_str("{")?;
+                    let formatter = obj
+                        .iter()
+                        .format_with(", ", |(k, v), f| f(&format_args!("\"{}\": {}", escape(k), v)));
+                    f.write_fmt(format_args!("{}", formatter))?;
+                    f.write_str("}")?;
+                };
             }
             JsonValue::Array(arr) => {
-                f.debug_list()
-                    .entries(arr.iter().map(DisplayAsDeBug))
-                    .finish()?;
+                if f.alternate() {
+                    let mut f: PadAdapter = f.into();
+                    f.write_str("[\n")?;
+                    let formatter = arr.iter().format_with(",\n", |elem, f| f(&format_args!("{:#}", elem)));
+                    f.write_fmt(format_args!("{}", formatter))?;
+                    f.into_inner().write_str("\n]")?;
+                } else {
+                    f.write_str("[")?;
+                    f.write_fmt(format_args!("{}", arr.iter().format(", ")))?;
+                    f.write_str("]")?;
+                };
             }
         };
         Ok(())
@@ -141,7 +156,10 @@ mod test {
             "name" => "Alice".into(),
             "phone_nums" => Json::from(btreemap! {
                 "home\t" => "123-456-7890".into(),
-                "work" => "012-345-6789".into(),
+                "work" => btreemap! {
+                    "office1" => "111-111-1111",
+                    "office2" => "222-222-2222"
+                }.into(),
                 "fax" => Json::from(None)
             }),
             "friends" => vec!["Brown", "Catherine", "Dell"].into()
