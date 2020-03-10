@@ -112,3 +112,12 @@ impl<'a, 'b: 'a> PadAdapter<'a, 'b> {
         self.fmt
     }
 }
+
+pub(crate) fn f64_to_i64(f: f64) -> Option<i64> {
+    let truncated = f.trunc() as i64;
+    if f - truncated as f64 == 0.0 {
+        Some(truncated)
+    } else {
+        None
+    }
+}
