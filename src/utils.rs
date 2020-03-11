@@ -1,7 +1,12 @@
+use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex, Replacer};
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Error, Formatter, Write};
+use std::ops::Range;
+
+pub(crate) const HIGH_SURROGATES: Range<u16> = 0xd800..0xdc00;
+pub(crate) const LOW_SURROGATES: Range<u16> = 0xdc00..0xe000;
 
 pub(crate) trait RegexExt {
     fn cow_replace<'t, R: Replacer>(&self, text: Cow<'t, str>, rep: R) -> Cow<'t, str>;
@@ -59,15 +64,52 @@ pub(crate) fn escape(string: &str) -> Cow<str> {
         match &caps[0] {
             "\\" => r#"\\"#.into(),
             "\"" => r#"\""#.into(),
-            "\u{0008}" => r#"\b"#.into(),
-            "\u{000c}" => r#"\f"#.into(),
-            "\u{000a}" => r#"\n"#.into(),
-            "\u{000d}" => r#"\r"#.into(),
-            "\u{0009}" => r#"\t"#.into(),
+            "\x08" => r#"\b"#.into(),
+            "\x0c" => r#"\f"#.into(),
+            "\x0a" => r#"\n"#.into(),
+            "\x0d" => r#"\r"#.into(),
+            "\x09" => r#"\t"#.into(),
             other => format!("\\u{:04x}", other.bytes().next().unwrap()).into(),
         }
     });
     string
+}
+
+pub(crate) fn unescape(input: &str) -> Cow<str> {
+    lazy_static! {
+        static ref PATTERNS: &'static [&'static str] =
+            &[r#"\""#, r"\\", r"\/", r"\b", r"\f", r"\n", r"\r", r"\t", r"\u"];
+        static ref REPLACEMENTS: &'static [&'static str] =
+            &["\"", "\\", "/", "\x08", "\x0c", "\x0a", "\x0d", "\x09"];
+        static ref AC: AhoCorasick = AhoCorasick::new_auto_configured(&PATTERNS);
+    }
+
+    let mut res = Cow::default();
+    let mut last_start = 0usize;
+    for mat in AC.find_iter(input) {
+        res += &input[last_start..mat.start()];
+        last_start = mat.end();
+
+        let pat_idx = mat.pattern();
+        res += if pat_idx < REPLACEMENTS.len() {
+            Cow::from(REPLACEMENTS[pat_idx])
+        } else {
+            last_start += 4;
+            let hex_digits = &input[mat.end()..mat.end() + 4];
+            let cp = u16::from_str_radix(hex_digits, 16).unwrap();
+            if HIGH_SURROGATES.contains(&cp) {
+                last_start += 6;
+                let hex_digits = &input[mat.end() + 6..mat.end() + 10];
+                let low_cp = u16::from_str_radix(hex_digits, 16).unwrap();
+                String::from_utf16(&[cp, low_cp]).unwrap()
+            } else {
+                String::from_utf16(&[cp]).unwrap()
+            }
+            .into()
+        };
+    }
+    res += &input[last_start..];
+    res
 }
 
 pub(crate) struct PadAdapter<'a, 'b: 'a> {

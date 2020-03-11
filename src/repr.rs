@@ -9,10 +9,10 @@ use std::fmt::Display;
 use std::fmt::{Error, Formatter, Write};
 use std::iter::FromIterator;
 
-#[derive(Shrinkwrap, PartialEq, Clone, DmFrom)]
+#[derive(Shrinkwrap, PartialEq, Clone, DmFrom, Debug)]
 pub struct Json<'a>(Option<JsonValue<'a>>);
 
-#[derive(PartialEq, DmFrom, Clone)]
+#[derive(PartialEq, DmFrom, Clone, Debug)]
 pub enum JsonValue<'a> {
     Int(i64),
     Float(f64),
