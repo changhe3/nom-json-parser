@@ -1,78 +1,36 @@
 use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
-use regex::{Captures, Regex, Replacer};
 use std::borrow::Cow;
-use std::fmt::{Debug, Display, Error, Formatter, Write};
+use std::fmt::{Error, Formatter, Write};
 use std::ops::Range;
 
 pub(crate) const HIGH_SURROGATES: Range<u16> = 0xd800..0xdc00;
 pub(crate) const LOW_SURROGATES: Range<u16> = 0xdc00..0xe000;
 
-pub(crate) trait RegexExt {
-    fn cow_replace<'t, R: Replacer>(&self, text: Cow<'t, str>, rep: R) -> Cow<'t, str>;
-    fn cow_replace_all<'t, R: Replacer>(&self, text: Cow<'t, str>, rep: R) -> Cow<'t, str>;
-    fn cow_replacen<'t, R: Replacer>(
-        &self,
-        text: Cow<'t, str>,
-        limit: usize,
-        rep: R,
-    ) -> Cow<'t, str>;
-}
-
-impl RegexExt for Regex {
-    fn cow_replace<'t, R: Replacer>(&self, text: Cow<'t, str>, rep: R) -> Cow<'t, str> {
-        match text {
-            Cow::Borrowed(borrowed) => self.replace(borrowed, rep),
-            Cow::Owned(owned) => self.replace(&owned, rep).into_owned().into(),
-        }
-    }
-
-    fn cow_replace_all<'t, R: Replacer>(&self, text: Cow<'t, str>, rep: R) -> Cow<'t, str> {
-        match text {
-            Cow::Borrowed(borrowed) => self.replace_all(borrowed, rep),
-            Cow::Owned(owned) => self.replace_all(&owned, rep).into_owned().into(),
-        }
-    }
-
-    fn cow_replacen<'t, R: Replacer>(
-        &self,
-        text: Cow<'t, str>,
-        limit: usize,
-        rep: R,
-    ) -> Cow<'t, str> {
-        match text {
-            Cow::Borrowed(borrowed) => self.replacen(borrowed, limit, rep),
-            Cow::Owned(owned) => self.replacen(&owned, limit, rep).into_owned().into(),
-        }
-    }
-}
-
-pub(crate) struct DisplayAsDeBug<T>(pub T);
-
-impl<T: Display> Debug for DisplayAsDeBug<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        self.0.fmt(f)?;
-        Ok(())
-    }
-}
-
-pub(crate) fn escape(string: &str) -> Cow<str> {
+pub(crate) fn escape(input: &str) -> Cow<str> {
     lazy_static! {
-        static ref RE_ESCAPE: Regex = Regex::new(r#"[\\"\u0000-\u001f]"#).unwrap();
+        static ref PATTERNS: &'static [&'static str] = &[
+            "\"", "\\", "\x00", "\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x07", "\x08",
+            "\x09", "\x0a", "\x0b", "\x0c", "\x0d", "\x0e", "\x0f", "\x10", "\x11", "\x12", "\x13", "\x14",
+            "\x15", "\x16", "\x17", "\x18", "\x19", "\x1a", "\x1b", "\x1c", "\x1d", "\x1e", "\x1f"
+        ];
+        static ref REPLACEMENTS: &'static [&'static str] = &[
+            r#"\""#, r#"\\"#, r#"\u0000"#, r#"\u0001"#, r#"\u0002"#, r#"\u0003"#, r#"\u0004"#, r#"\u0005"#, r#"\u0006"#, r#"\u0007"#, r#"\b"#,
+            r#"\t"#, r#"\n"#, r#"\u000b"#, r#"\f"#, r#"\r"#, r#"\u000e"#, r#"\u000f"#, r#"\u0010"#, r#"\u0011"#, r#"\u0012"#, r#"\u0013"#, r#"\u0014"#,
+            r#"\u0015"#, r#"\u0016"#, r#"\u0017"#, r#"\u0018"#, r#"\u0019"#, r#"\u001a"#, r#"\u001b"#, r#"\u001c"#, r#"\u001d"#, r#"\u001e"#, r#"\u001f"#
+        ];
+        static ref AC: AhoCorasick = AhoCorasick::new_auto_configured(&PATTERNS);
     }
-    let string = RE_ESCAPE.replace_all(string, |caps: &Captures| -> Cow<str> {
-        match &caps[0] {
-            "\\" => r#"\\"#.into(),
-            "\"" => r#"\""#.into(),
-            "\x08" => r#"\b"#.into(),
-            "\x0c" => r#"\f"#.into(),
-            "\x0a" => r#"\n"#.into(),
-            "\x0d" => r#"\r"#.into(),
-            "\x09" => r#"\t"#.into(),
-            other => format!("\\u{:04x}", other.bytes().next().unwrap()).into(),
-        }
-    });
-    string
+
+    let mut res = Cow::default();
+    let mut last_start = 0usize;
+    for mat in AC.find_iter(input) {
+        res += &input[last_start..mat.start()];
+        last_start = mat.end();
+        res += REPLACEMENTS[mat.pattern()];
+    }
+    res += &input[last_start..];
+    res
 }
 
 pub(crate) fn unescape(input: &str) -> Cow<str> {
