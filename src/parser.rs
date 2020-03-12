@@ -1,16 +1,18 @@
 use crate::repr::Json;
-use crate::utils::{f64_to_i64, unescape, HIGH_SURROGATES, LOW_SURROGATES};
+use crate::utils::{unescape, HIGH_SURROGATES, LOW_SURROGATES};
 
+use debug_unreachable::debug_unreachable;
 use nom::branch::alt;
 use nom::bytes::complete::*;
 use nom::bytes::streaming::escaped;
 use nom::character::complete::*;
 use nom::combinator::*;
+use nom::combinator::{map_parserc, optc};
 use nom::error::{ErrorKind, ParseError};
-use nom::number::complete::double;
+use nom::number::complete::{double, recognize_float};
 use nom::sequence::*;
 use nom::Err::{Error, Failure};
-use nom::IResult;
+use nom::{AsChar, IResult};
 
 pub type ParserResult<'a, O, E> = IResult<&'a str, O, E>;
 pub type JsonResult<'a, E> = ParserResult<'a, Json<'a>, E>;
@@ -47,17 +49,34 @@ fn parse_false<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> 
 }
 
 fn parse_number<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    let (input, num) = double(input)?;
-    let json = if let Some(int) = f64_to_i64(num) {
-        int.into()
-    } else {
-        num.into()
-    };
-    Ok((input, json))
+    map_parserc(
+        input,
+        recognize_float,
+        alt((
+            map(all_consuming(parse_int), Into::into),
+            map(all_consuming(double), Into::into),
+        )),
+    )
+}
+
+fn parse_int<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<'a, i64, E> {
+    let (input, pos) = optc(
+        input,
+        map(one_of("+-"), |c| match c {
+            '+' => 1,
+            '-' => -1,
+            _ => unsafe { debug_unreachable!("unreachable") },
+        }),
+    )?;
+    let (input, digits) = take_while1(|c: char| c.is_dec_digit())(input)?;
+    digits
+        .parse()
+        .map_err(|_| Error(E::from_error_kind(digits, ErrorKind::Digit)))
+        .map(|res: i64| (input, pos.unwrap_or(1) * res))
 }
 
 fn hex_u16<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<'a, u16, E> {
-    let (input, hex_digits) = take_while_m_n(1, 4, |c: char| c.is_ascii_hexdigit())(input)?;
+    let (input, hex_digits) = take_while_m_n(1, 4, |c: char| c.is_hex_digit())(input)?;
     let res: u32 = hex_digits
         .chars()
         .rev()
@@ -258,6 +277,34 @@ mod test {
             } else {
                 prop_assert!(false);
             }
+        }
+
+        #[test]
+        fn test_parse_int(i: i64, rest in r#" \PC*"#) {
+            if let Ok((remaining, Json(Some(JsonValue::Int(res))))) = parse_number::<E>(&format!("{}{}", i, rest)) {
+                prop_assert_eq!(remaining, rest);
+                prop_assert_eq!(res, i);
+            } else {
+                prop_assert!(false);
+            }
+        }
+
+        #[test]
+        fn test_parse_float(f: f64, rest in r#" \PC*"#) {
+            match parse_number::<E>(&format!("{}{}", f, rest)) {
+                Ok((remaining, Json(Some(JsonValue::Int(res))))) => {
+                    prop_assert_eq!(remaining, rest);
+                    prop_assert_eq!(res as f64, f);
+                },
+                Ok((remaining, Json(Some(JsonValue::Float(res))))) => {
+                    prop_assert_eq!(remaining, rest);
+                    prop_assert_eq!(res, f);
+                },
+                e @ _ => {
+                    eprintln!("{:?}", e);
+                    prop_assert!(false);
+                }
+            };
         }
     }
 }
