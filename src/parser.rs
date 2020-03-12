@@ -3,6 +3,7 @@ use crate::utils::{f64_to_i64, unescape, HIGH_SURROGATES, LOW_SURROGATES};
 
 use nom::branch::alt;
 use nom::bytes::complete::*;
+use nom::bytes::streaming::escaped;
 use nom::character::complete::*;
 use nom::combinator::*;
 use nom::error::{ErrorKind, ParseError};
@@ -113,9 +114,12 @@ fn parse_object<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E>
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::repr::JsonValue;
+    use crate::utils::escape;
     use assert_matches::assert_matches;
-    use std::borrow::Cow::*;
+    use itertools::Itertools;
     use proptest::prelude::*;
+    use std::borrow::Cow::*;
 
     type E<'a> = (&'a str, ErrorKind);
 
@@ -144,6 +148,7 @@ mod test {
 
     #[test]
     fn test_unquote() {
+        assert_eq!(unquote::<E>(r#""""#), Ok(("", "")));
         assert_eq!(
             unquote::<E>(r#""a normal string" rest"#),
             Ok((" rest", "a normal string"))
@@ -183,7 +188,10 @@ mod test {
 
     #[test]
     fn test_parse_string() {
-        assert_eq!(parse_string::<E>(r#""a normal string" rest"#), Ok((" rest", "a normal string".into())));
+        assert_eq!(
+            parse_string::<E>(r#""a normal string" rest"#),
+            Ok((" rest", "a normal string".into()))
+        );
         assert_eq!(
             parse_string::<E>(r#""a\r\nstring\r\nwith\r\nnewlines\r\non\r\nwindows" rest"#),
             Ok((
@@ -194,10 +202,7 @@ mod test {
         assert_eq!(
             parse_string::<E>(r#""\u4e00\u4e2a\u542b\u6709UTF-16\u7684\u5b57\u7b26\u4e32" rest"#),
             // "一个含有UTF-16的字符串"
-            Ok((
-                " rest",
-                "一个含有UTF-16的字符串".into()
-            ))
+            Ok((" rest", "一个含有UTF-16的字符串".into()))
         );
         assert_eq!(
             parse_string::<E>(r#""\uD834\uDD1E\u006d\u0075\u0073\uDD1E\u0069\u0063\uD834""#),
@@ -209,4 +214,50 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_parse_string_empty() {
+        assert_eq!(parse_string::<E>(r#""""#), Ok(("", "".into())));
+    }
+
+    #[test]
+    fn test_parse_string_invalid_escape() {
+        assert_matches!(parse_string::<E>(r#"hello\a\world"#), Err(_));
+        assert_matches!(parse_string::<E>(r#"utf16: \uff"#), Err(_));
+    }
+
+    proptest! {
+        #[test]
+        fn test_parse_string_random(s in "\\PC*") {
+            let _ = parse_string::<E>(&s);
+        }
+
+        #[test]
+        fn test_parse_string_no_escape(s in r#""[^\pC\\"]*""#) {
+            let res = parse_string::<E>(&s);
+            prop_assert_eq!(res, Ok(("", Json::from(&s[1..s.len() - 1]))));
+        }
+
+        #[test]
+        fn test_parse_string_regular_escape(s in r#""(?:[^\pC\\"/]|\\[\\/"bfnrt])*"[^"]*"#) {
+            let split = &s.rfind('"').unwrap() + 1;
+            let unquoted = &s[1..split - 1];
+            if let Ok((rest, Json(Some(JsonValue::String(res))))) = parse_string::<E>(&s) {
+                prop_assert_eq!(rest, &s[split..]);
+                prop_assert_eq!(&escape(&res).replace('/', "\\/"), unquoted);
+            } else {
+                prop_assert!(false);
+            }
+        }
+
+        #[test]
+        fn test_parse_string_utf16(orig in r#"[^\pC\\"]*"#, rest in r#"[^"]*"#) {
+            let s = format!(r#""{}"{}"#, orig.encode_utf16().format_with("", |cp, f| f(&format_args!("\\u{:04X}", cp))), rest);
+            if let Ok((remaining, Json(Some(JsonValue::String(res))))) = parse_string::<E>(&s) {
+                prop_assert_eq!(remaining, rest);
+                prop_assert_eq!(res, orig);
+            } else {
+                prop_assert!(false);
+            }
+        }
+    }
 }

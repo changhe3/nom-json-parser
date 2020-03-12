@@ -10,7 +10,7 @@ use std::fmt::{Error, Formatter, Write};
 use std::iter::FromIterator;
 
 #[derive(Shrinkwrap, PartialEq, Clone, DmFrom, Debug)]
-pub struct Json<'a>(Option<JsonValue<'a>>);
+pub struct Json<'a>(pub(crate) Option<JsonValue<'a>>);
 
 #[derive(PartialEq, DmFrom, Clone, Debug)]
 pub enum JsonValue<'a> {
