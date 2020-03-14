@@ -1,2 +1,4 @@
 /target
 Cargo.lock
+/docs/debug
+/docs/.rustc_info.json
