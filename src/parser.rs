@@ -48,14 +48,17 @@ fn parse_false<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> 
 }
 
 fn parse_number<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    map_parserc(
-        input,
-        recognize_float,
-        alt((
-            map(map_res(rest, |s: &str| s.parse::<i64>()), Into::into),
-            map(all_consuming(double), Into::into),
-        )),
-    )
+    let (input, num_str) = recognize_float(input)?;
+    let (_, num) = if num_str.contains(['.', 'e'].as_ref()) {
+        mapc(num_str, all_consuming(double), Into::into)?
+    } else {
+        mapc(
+            num_str,
+            map_res(rest, |s: &str| s.parse::<i64>()),
+            Into::into,
+        )?
+    };
+    Ok((input, num))
 }
 
 fn hex_u16<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<'a, u16, E> {
@@ -114,19 +117,19 @@ fn parse_string<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E>
 fn parse_array<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
     delimitedc(
         input,
-        char('['),
+        terminated(char('['), multispace0),
         |input| {
             delimited_list(input, parse_json_element, char(','))
                 .process(|it| it.collect::<Vec<_>>().into())
         },
-        char(']'),
+        preceded(multispace0, char(']')),
     )
 }
 
 fn parse_object<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
     delimitedc(
         input,
-        char('{'),
+        terminated(char('{'), multispace0),
         |input| {
             delimited_list(
                 input,
@@ -138,7 +141,7 @@ fn parse_object<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResul
             )
             .process(|it| it.collect::<BTreeMap<_, _>>().into())
         },
-        char('}'),
+        terminated(multispace0, char('}')),
     )
 }
 
@@ -149,13 +152,35 @@ mod test {
     use crate::utils::escape;
     use assert_matches::assert_matches;
     use itertools::Itertools;
+    use prop::collection::{btree_map, vec};
     use proptest::num;
     use proptest::prelude::*;
+    use proptest::string::string_regex;
 
     type E<'a> = (&'a str, ErrorKind);
 
-    fn json_number() -> num::f64::Any {
+    fn arb_json_number() -> num::f64::Any {
         num::f64::POSITIVE | num::f64::NEGATIVE | num::f64::ZERO
+    }
+
+    fn arb_json_string() -> impl Strategy<Value = String> {
+        string_regex(r#"(?:[^\pC\\"]|\\[\\/"bfnrt])*"#).unwrap()
+    }
+
+    fn arb_json() -> impl Strategy<Value = Json<'static>> {
+        let leaf = prop_oneof![
+            Just(None.into()),
+            any::<bool>().prop_map(Into::into),
+            any::<i64>().prop_map(Into::into),
+            arb_json_number().prop_map(Into::into),
+            arb_json_string().prop_map(|s| s.into())
+        ];
+        leaf.prop_recursive(8, 256, 10, |inner| {
+            prop_oneof![
+                vec(inner.clone(), 0..10).prop_map(Into::into),
+                btree_map(arb_json_string(), inner.clone(), 0..10).prop_map(Into::into)
+            ]
+        })
     }
 
     #[test]
@@ -306,7 +331,7 @@ mod test {
         }
 
         #[test]
-        fn test_parse_float(f in json_number(), rest in r#" \PC*"#) {
+        fn test_parse_float(f in arb_json_number(), rest in r#" \PC*"#) {
             match parse_number::<E>(&format!("{}{}", f, rest)) {
                 Ok((remaining, Json(Some(JsonValue::Int(res))))) => {
                     prop_assert_eq!(remaining, rest);
@@ -321,6 +346,17 @@ mod test {
                     prop_assert!(false);
                 }
             };
+        }
+
+        #[test]
+        fn test_parse_json_random(s in r#"\PC*"#) {
+            let _ = parse_json_element::<E>(&s);
+        }
+
+        #[test]
+        fn test_parse_json(json in arb_json()) {
+            let input = format!("{:#}", json);
+            prop_assert_eq!(parse_json_element::<E>(&input), Ok(("", json)));
         }
     }
 }

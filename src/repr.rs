@@ -9,10 +9,10 @@ use std::fmt::Display;
 use std::fmt::{Error, Formatter, Write};
 use std::iter::FromIterator;
 
-#[derive(Shrinkwrap, PartialEq, Clone, DmFrom, Debug)]
+#[derive(Shrinkwrap, PartialEq, PartialOrd, Clone, DmFrom, Debug)]
 pub struct Json<'a>(pub(crate) Option<JsonValue<'a>>);
 
-#[derive(PartialEq, DmFrom, Clone, Debug)]
+#[derive(PartialEq, PartialOrd, DmFrom, Clone, Debug)]
 pub enum JsonValue<'a> {
     Int(i64),
     Float(f64),
@@ -26,6 +26,12 @@ pub enum JsonValue<'a> {
 
 impl<'a> From<&'a str> for JsonValue<'a> {
     fn from(arg: &'a str) -> Self {
+        JsonValue::String(arg.into())
+    }
+}
+
+impl From<String> for JsonValue<'_> {
+    fn from(arg: String) -> Self {
         JsonValue::String(arg.into())
     }
 }
@@ -91,7 +97,11 @@ impl Display for JsonValue<'_> {
                 f.write_str(&int.to_string())?;
             }
             JsonValue::Float(float) => {
-                f.write_str(&float.to_string())?;
+                if float.fract() == 0.0 {
+                    f.write_fmt(format_args!("{}.0", float))?;
+                } else {
+                    f.write_fmt(format_args!("{}", float))?;
+                };
             }
             JsonValue::String(string) => {
                 f.write_str("\"")?;
@@ -147,8 +157,9 @@ mod test {
     #[test]
     fn manual_tests() {
         let json: Json = btreemap! {
-            "a" => 1,
-            "b" => 2,
+            "int" => Json::from(1i64),
+            "float" => Json::from(1f64),
+            "float2" => Json::from(1.265),
         }
         .into();
         println!("{}", json);
