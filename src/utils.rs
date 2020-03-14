@@ -5,7 +5,7 @@ use nom::combinator::{iterator, map, opt, ParserIterator};
 use nom::error::{ErrorKind, ParseError};
 use nom::sequence::tuple;
 use nom::IResult;
-use once_cell::unsync::Lazy;
+use once_cell::sync::Lazy;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::fmt::{Error, Formatter, Write};
@@ -15,12 +15,12 @@ pub(crate) const HIGH_SURROGATES: Range<u16> = 0xd800..0xdc00;
 pub(crate) const LOW_SURROGATES: Range<u16> = 0xdc00..0xe000;
 
 pub(crate) fn escape(input: &str) -> Cow<str> {
-    const PATTERNS: &[&str] = &[
+    static PATTERNS: &[&str] = &[
         "\"", "\\", "\x00", "\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x07", "\x08", "\x09",
         "\x0a", "\x0b", "\x0c", "\x0d", "\x0e", "\x0f", "\x10", "\x11", "\x12", "\x13", "\x14",
         "\x15", "\x16", "\x17", "\x18", "\x19", "\x1a", "\x1b", "\x1c", "\x1d", "\x1e", "\x1f",
     ];
-    const REPLACEMENTS: &'static [&'static str] = &[
+    static REPLACEMENTS: &'static [&'static str] = &[
         r#"\""#,
         r#"\\"#,
         r#"\u0000"#,
@@ -56,11 +56,11 @@ pub(crate) fn escape(input: &str) -> Cow<str> {
         r#"\u001e"#,
         r#"\u001f"#,
     ];
-    let ac = Lazy::new(|| AhoCorasick::new_auto_configured(PATTERNS));
+    static AC: Lazy<AhoCorasick> = Lazy::new(|| AhoCorasick::new_auto_configured(PATTERNS));
 
     let mut res = Cow::default();
     let mut last_start = 0usize;
-    for mat in ac.find_iter(input) {
+    for mat in AC.find_iter(input) {
         res += &input[last_start..mat.start()];
         last_start = mat.end();
         res += REPLACEMENTS[mat.pattern()];
@@ -70,17 +70,17 @@ pub(crate) fn escape(input: &str) -> Cow<str> {
 }
 
 pub(crate) fn unescape(input: &str) -> Cow<str> {
-    const PATTERNS: &'static [&'static str] = &[
+    static PATTERNS: &'static [&'static str] = &[
         r#"\""#, r"\\", r"\/", r"\b", r"\f", r"\n", r"\r", r"\t", r"\u",
     ];
-    const REPLACEMENTS: &'static [&'static str] =
+    static REPLACEMENTS: &'static [&'static str] =
         &["\"", "\\", "/", "\x08", "\x0c", "\x0a", "\x0d", "\x09"];
-    let ac = Lazy::new(|| AhoCorasick::new_auto_configured(PATTERNS));
+    static AC: Lazy<AhoCorasick> = Lazy::new(|| AhoCorasick::new_auto_configured(PATTERNS));
 
     let mut res = Cow::default();
     let mut last_start = 0usize;
     let mut vec: ArrayVec<[u16; 2]> = ArrayVec::new();
-    for mat in ac.find_iter(input) {
+    for mat in AC.find_iter(input) {
         res += &input[last_start..mat.start()];
         last_start = mat.end();
 
