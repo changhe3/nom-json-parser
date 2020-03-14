@@ -1,9 +1,10 @@
 use aho_corasick::AhoCorasick;
 use arrayvec::ArrayVec;
 use debug_unreachable::debug_unreachable;
+use nom::character::complete::multispace0;
 use nom::combinator::{iterator, map, opt, ParserIterator};
 use nom::error::{ErrorKind, ParseError};
-use nom::sequence::tuple;
+use nom::sequence::{delimited, tuple};
 use nom::IResult;
 use once_cell::sync::Lazy;
 use std::borrow::Cow;
@@ -148,6 +149,29 @@ impl<'a, 'b: 'a> PadAdapter<'a, 'b> {
     pub fn into_inner(self) -> &'a mut Formatter<'b> {
         self.fmt
     }
+}
+
+pub(crate) fn wrap_ws<'a, O, E: ParseError<&'a str>, F>(
+    wrapped: F,
+) -> impl Fn(&'a str) -> IResult<&'a str, O, E>
+where
+    F: Fn(&'a str) -> IResult<&'a str, O, E>,
+{
+    delimited(multispace0, wrapped, multispace0)
+}
+
+pub(crate) fn into<I, O: Into<R>, R, E: ParseError<I>, F>(from: F) -> impl Fn(I) -> IResult<I, R, E>
+where
+    F: Fn(I) -> IResult<I, O, E>,
+{
+    map(from, Into::into)
+}
+
+pub(crate) fn intoc<I, O: Into<R>, R, E: ParseError<I>, F>(input: I, from: F) -> IResult<I, R, E>
+where
+    F: Fn(I) -> IResult<I, O, E>,
+{
+    into(from)(input)
 }
 
 pub(crate) fn delimited_list<I: Clone, O, O1, E: ParseError<I>, F, G>(

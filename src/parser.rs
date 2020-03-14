@@ -1,5 +1,8 @@
 use crate::repr::Json;
-use crate::utils::{delimited_list, unescape, ParserIteratorExt, HIGH_SURROGATES, LOW_SURROGATES};
+use crate::utils::{
+    delimited_list, into, intoc, unescape, wrap_ws, ParserIteratorExt, HIGH_SURROGATES,
+    LOW_SURROGATES,
+};
 
 use nom::branch::alt;
 use nom::bytes::complete::*;
@@ -19,8 +22,38 @@ use std::borrow::Cow;
 pub type ParserResult<'a, O, E> = IResult<&'a str, O, E>;
 pub type JsonResult<'a, E> = ParserResult<'a, Json<'a>, E>;
 
+/// Parse JSON from string
+///
+/// # Example
+/// ```rust
+/// use nom_json_parser::{parse, Json};
+/// use nom::error::ErrorKind;
+/// use maplit::btreemap;
+/// type E<'a> = (&'a str, ErrorKind);
+///
+/// let json_str = r#"{
+///     "name": "Frank",
+///     "age": 18,
+///     "phone": {
+///         "work": "123-456-7890",
+///         "home": "098-765-4321",
+///         "fax": null
+///     }
+/// }"#;
+/// let result = parse::<E>(json_str);
+/// let json = btreemap!{
+///     "name" => Json::from("Frank"),
+///     "age" => 18.into(),
+///     "phone" => btreemap!{
+///         "work" => "123-456-7890".into(),
+///         "home" => "098-765-4321".into(),
+///         "fax" => Json::from(None)
+///     }.into()
+/// }.into();
+/// assert_eq!(result, Ok(("", json)));
+/// ```
 pub fn parse_json_element<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    completec(input, delimited(multispace0, parse_json, multispace0))
+    wrap_ws(parse_json)(input)
 }
 
 fn parse_json<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
@@ -50,13 +83,12 @@ fn parse_false<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> 
 fn parse_number<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
     let (input, num_str) = recognize_float(input)?;
     let (_, num) = if num_str.contains(['.', 'e'].as_ref()) {
-        mapc(num_str, all_consuming(double), Into::into)?
+        intoc(num_str, all_consuming(double))?
     } else {
-        mapc(
-            num_str,
-            map_res(rest, |s: &str| s.parse::<i64>()),
-            Into::into,
-        )?
+        alt((
+            into(map_res(rest, |s: &str| s.parse::<i64>())),
+            into(all_consuming(double)),
+        ))(num_str)?
     };
     Ok((input, num))
 }
@@ -107,11 +139,11 @@ fn unquote<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<'a, &'a s
 fn parse_string_raw<'a, E: ParseError<&'a str>>(
     input: &'a str,
 ) -> ParserResult<'a, Cow<'a, str>, E> {
-    mapc(input, unquote, |string| unescape(string))
+    mapc(input, unquote, unescape)
 }
 
 fn parse_string<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    mapc(input, parse_string_raw, Into::into)
+    intoc(input, parse_string_raw)
 }
 
 fn parse_array<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
@@ -134,7 +166,7 @@ fn parse_object<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResul
             delimited_list(
                 input,
                 tuple((
-                    delimited(multispace0, parse_string_raw, multispace0),
+                    wrap_ws(parse_string_raw),
                     preceded(char(':'), parse_json_element),
                 )),
                 char(','),

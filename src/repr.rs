@@ -9,17 +9,56 @@ use std::fmt::Display;
 use std::fmt::{Error, Formatter, Write};
 use std::iter::FromIterator;
 
+/// A struct representing a JSON value.
+///
+/// This struct represents a JSON value via its underlying `Option<JsonValue<'_>>`,
+/// accessible via its `Deref` trait. It represents a JSON `null` value, when the underlying
+/// `Option` is `None`. It also implement `From` traits to allow conversions from common JSON
+/// data types.
+///
+/// # Example
+/// ```rust
+/// use nom_json_parser::Json;
+/// use maplit::btreemap;
+///
+/// let null: Json = None.into();
+/// let int: Json = 1i64.into();
+/// let float: Json = 3.14f64.into();
+/// let boolean: Json = true.into();
+/// let string: Json = "hello".into();
+/// let string_owned: Json = "world".to_string().into();
+/// let homogeneous_object: Json = btreemap! {
+///     "name1" => "Alice",
+///     "name2" => "Brown",
+///     "name3" => "Cameron"
+/// }.into();
+/// let heterogeneous_object: Json = btreemap! {
+///     "name" => "Alice".into(),
+///     "age" => Json::from(20)
+/// }.into();
+/// let homogeneous_list: Json = vec![1, 2, 3, 4].into();
+/// let heterogeneous_list: Json = vec![1.into(), "string".into(), Json::from(None)].into();
+/// ```
 #[derive(Shrinkwrap, PartialEq, PartialOrd, Clone, DmFrom, Debug)]
 pub struct Json<'a>(pub(crate) Option<JsonValue<'a>>);
 
+/// An enum representing a non-null JSON value.
 #[derive(PartialEq, PartialOrd, DmFrom, Clone, Debug)]
 pub enum JsonValue<'a> {
+    /// An integer, that is, any JSON number that does not contain a decimal point or exponent
+    /// and can fit into an `i64`.
     Int(i64),
+    /// A JSON number that either contain a decimal point or exponent,
+    /// or too large to fit into an `i64`
     Float(f64),
+    /// A JSON string.
     String(Cow<'a, str>),
+    /// A JSON boolean value.
     Bool(bool),
+    /// A JSON object
     #[from(ignore)]
     Object(BTreeMap<Cow<'a, str>, Json<'a>>),
+    /// A JSON array
     #[from(ignore)]
     Array(Vec<Json<'a>>),
 }

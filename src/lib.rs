@@ -2,6 +2,7 @@ mod parser;
 mod repr;
 mod utils;
 
+pub use nom::{error::ErrorKind, Err};
 pub use parser::parse_json_element as parse;
 pub use repr::{Json, JsonValue};
 
