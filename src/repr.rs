@@ -36,12 +36,6 @@ impl From<String> for JsonValue<'_> {
     }
 }
 
-impl<'a: 'b, 'b> From<&'b [Json<'a>]> for JsonValue<'a> {
-    fn from(arg: &'b [Json<'a>]) -> Self {
-        JsonValue::Array(arg.to_vec())
-    }
-}
-
 impl<'a, V: Into<Json<'a>>> FromIterator<V> for JsonValue<'a> {
     fn from_iter<T: IntoIterator<Item = V>>(iter: T) -> Self {
         JsonValue::Array(iter.into_iter().map(V::into).collect())

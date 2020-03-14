@@ -8,7 +8,7 @@ use nom::IResult;
 use once_cell::sync::Lazy;
 use std::borrow::Cow;
 use std::cell::Cell;
-use std::fmt::{Arguments, Error, Formatter, Write};
+use std::fmt::{Error, Formatter, Write};
 use std::ops::Range;
 
 pub(crate) const HIGH_SURROGATES: Range<u16> = 0xd800..0xdc00;
@@ -228,6 +228,7 @@ mod test {
         )
     }
 
+    #[test]
     fn test_delimited_list_empty() {
         assert_eq!(parse_vector::<E, _, _>("[]", double), Ok(("", Vec::new())));
     }
