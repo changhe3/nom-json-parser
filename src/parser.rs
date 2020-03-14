@@ -1,5 +1,5 @@
 use crate::repr::Json;
-use crate::utils::{unescape, HIGH_SURROGATES, LOW_SURROGATES};
+use crate::utils::{delimited_list, unescape, ParserIteratorExt, HIGH_SURROGATES, LOW_SURROGATES};
 
 use nom::branch::alt;
 use nom::bytes::complete::*;
@@ -8,19 +8,22 @@ use nom::character::complete::*;
 use nom::combinator::*;
 use nom::combinator::{map_parserc, mapc};
 use nom::error::{ErrorKind, ParseError};
+use nom::lib::std::collections::BTreeMap;
 use nom::number::complete::{double, recognize_float};
+use nom::sequence::delimitedc;
 use nom::sequence::*;
 use nom::Err::Failure;
 use nom::{AsChar, IResult};
+use std::borrow::Cow;
 
 pub type ParserResult<'a, O, E> = IResult<&'a str, O, E>;
 pub type JsonResult<'a, E> = ParserResult<'a, Json<'a>, E>;
 
-pub fn parse<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
+pub fn parse_json_element<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
     completec(input, delimited(multispace0, parse_json, multispace0))
 }
 
-fn parse_json<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
+fn parse_json<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
     alt((
         parse_null,
         parse_true,
@@ -98,16 +101,45 @@ fn unquote<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<'a, &'a s
     )
 }
 
+fn parse_string_raw<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> ParserResult<'a, Cow<'a, str>, E> {
+    mapc(input, unquote, |string| unescape(string))
+}
+
 fn parse_string<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    mapc(input, unquote, |string| unescape(string).into())
+    mapc(input, parse_string_raw, Into::into)
 }
 
-fn parse_array<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    todo!()
+fn parse_array<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
+    delimitedc(
+        input,
+        char('['),
+        |input| {
+            delimited_list(input, parse_json_element, char(','))
+                .process(|it| it.collect::<Vec<_>>().into())
+        },
+        char(']'),
+    )
 }
 
-fn parse_object<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    todo!()
+fn parse_object<'a, E: Clone + ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
+    delimitedc(
+        input,
+        char('{'),
+        |input| {
+            delimited_list(
+                input,
+                tuple((
+                    delimited(multispace0, parse_string_raw, multispace0),
+                    preceded(char(':'), parse_json_element),
+                )),
+                char(','),
+            )
+            .process(|it| it.collect::<BTreeMap<_, _>>().into())
+        },
+        char('}'),
+    )
 }
 
 #[cfg(test)]
@@ -117,9 +149,14 @@ mod test {
     use crate::utils::escape;
     use assert_matches::assert_matches;
     use itertools::Itertools;
+    use proptest::num;
     use proptest::prelude::*;
 
     type E<'a> = (&'a str, ErrorKind);
+
+    fn json_number() -> num::f64::Any {
+        num::f64::POSITIVE | num::f64::NEGATIVE | num::f64::ZERO
+    }
 
     #[test]
     fn test_parse_escape_seq() {
@@ -269,7 +306,7 @@ mod test {
         }
 
         #[test]
-        fn test_parse_float(f: f64, rest in r#" \PC*"#) {
+        fn test_parse_float(f in json_number(), rest in r#" \PC*"#) {
             match parse_number::<E>(&format!("{}{}", f, rest)) {
                 Ok((remaining, Json(Some(JsonValue::Int(res))))) => {
                     prop_assert_eq!(remaining, rest);

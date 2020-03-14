@@ -228,6 +228,10 @@ mod test {
         )
     }
 
+    fn test_delimited_list_empty() {
+        assert_eq!(parse_vector::<E, _, _>("[]", double), Ok(("", Vec::new())));
+    }
+
     proptest! {
         #[test]
         fn test_unescape_random(s in r#"[^\pC\\]*"#) {

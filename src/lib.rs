@@ -2,7 +2,7 @@ mod parser;
 mod repr;
 mod utils;
 
-pub use parser::parse;
+pub use parser::parse_json_element as parse;
 pub use repr::{Json, JsonValue};
 
 #[cfg(test)]
