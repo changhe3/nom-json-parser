@@ -1,17 +1,16 @@
 use crate::repr::Json;
 use crate::utils::{unescape, HIGH_SURROGATES, LOW_SURROGATES};
 
-use debug_unreachable::debug_unreachable;
 use nom::branch::alt;
 use nom::bytes::complete::*;
 use nom::bytes::streaming::escaped;
 use nom::character::complete::*;
 use nom::combinator::*;
-use nom::combinator::{map_parserc, optc};
+use nom::combinator::{map_parserc, mapc};
 use nom::error::{ErrorKind, ParseError};
 use nom::number::complete::{double, recognize_float};
 use nom::sequence::*;
-use nom::Err::{Error, Failure};
+use nom::Err::Failure;
 use nom::{AsChar, IResult};
 
 pub type ParserResult<'a, O, E> = IResult<&'a str, O, E>;
@@ -34,18 +33,15 @@ fn parse_json<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
 }
 
 fn parse_null<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    let (input, _) = tag("null")(input)?;
-    Ok((input, Json::from(None)))
+    mapc(input, tag("null"), |_| Json::from(None))
 }
 
 fn parse_true<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    let (input, _) = tag("true")(input)?;
-    Ok((input, Json::from(true)))
+    mapc(input, tag("true"), |_| Json::from(true))
 }
 
 fn parse_false<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    let (input, _) = tag("false")(input)?;
-    Ok((input, Json::from(false)))
+    mapc(input, tag("false"), |_| Json::from(false))
 }
 
 fn parse_number<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
@@ -53,26 +49,10 @@ fn parse_number<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E>
         input,
         recognize_float,
         alt((
-            map(all_consuming(parse_int), Into::into),
+            map(map_res(rest, |s: &str| s.parse::<i64>()), Into::into),
             map(all_consuming(double), Into::into),
         )),
     )
-}
-
-fn parse_int<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<'a, i64, E> {
-    let (input, pos) = optc(
-        input,
-        map(one_of("+-"), |c| match c {
-            '+' => 1,
-            '-' => -1,
-            _ => unsafe { debug_unreachable!("unreachable") },
-        }),
-    )?;
-    let (input, digits) = take_while1(|c: char| c.is_dec_digit())(input)?;
-    digits
-        .parse()
-        .map_err(|_| Error(E::from_error_kind(digits, ErrorKind::Digit)))
-        .map(|res: i64| (input, pos.unwrap_or(1) * res))
 }
 
 fn hex_u16<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<'a, u16, E> {
@@ -138,7 +118,6 @@ mod test {
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use proptest::prelude::*;
-    use std::borrow::Cow::*;
 
     type E<'a> = (&'a str, ErrorKind);
 

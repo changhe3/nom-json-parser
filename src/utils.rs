@@ -1,8 +1,13 @@
 use aho_corasick::AhoCorasick;
 use arrayvec::ArrayVec;
 use debug_unreachable::debug_unreachable;
-use lazy_static::lazy_static;
+use nom::combinator::{iterator, map, opt, ParserIterator};
+use nom::error::{ErrorKind, ParseError};
+use nom::sequence::tuple;
+use nom::IResult;
+use once_cell::unsync::Lazy;
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::fmt::{Error, Formatter, Write};
 use std::ops::Range;
 
@@ -10,55 +15,52 @@ pub(crate) const HIGH_SURROGATES: Range<u16> = 0xd800..0xdc00;
 pub(crate) const LOW_SURROGATES: Range<u16> = 0xdc00..0xe000;
 
 pub(crate) fn escape(input: &str) -> Cow<str> {
-    lazy_static! {
-        static ref PATTERNS: &'static [&'static str] = &[
-            "\"", "\\", "\x00", "\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x07", "\x08",
-            "\x09", "\x0a", "\x0b", "\x0c", "\x0d", "\x0e", "\x0f", "\x10", "\x11", "\x12", "\x13",
-            "\x14", "\x15", "\x16", "\x17", "\x18", "\x19", "\x1a", "\x1b", "\x1c", "\x1d", "\x1e",
-            "\x1f"
-        ];
-        static ref REPLACEMENTS: &'static [&'static str] = &[
-            r#"\""#,
-            r#"\\"#,
-            r#"\u0000"#,
-            r#"\u0001"#,
-            r#"\u0002"#,
-            r#"\u0003"#,
-            r#"\u0004"#,
-            r#"\u0005"#,
-            r#"\u0006"#,
-            r#"\u0007"#,
-            r#"\b"#,
-            r#"\t"#,
-            r#"\n"#,
-            r#"\u000b"#,
-            r#"\f"#,
-            r#"\r"#,
-            r#"\u000e"#,
-            r#"\u000f"#,
-            r#"\u0010"#,
-            r#"\u0011"#,
-            r#"\u0012"#,
-            r#"\u0013"#,
-            r#"\u0014"#,
-            r#"\u0015"#,
-            r#"\u0016"#,
-            r#"\u0017"#,
-            r#"\u0018"#,
-            r#"\u0019"#,
-            r#"\u001a"#,
-            r#"\u001b"#,
-            r#"\u001c"#,
-            r#"\u001d"#,
-            r#"\u001e"#,
-            r#"\u001f"#
-        ];
-        static ref AC: AhoCorasick = AhoCorasick::new_auto_configured(&PATTERNS);
-    }
+    const PATTERNS: &[&str] = &[
+        "\"", "\\", "\x00", "\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x07", "\x08", "\x09",
+        "\x0a", "\x0b", "\x0c", "\x0d", "\x0e", "\x0f", "\x10", "\x11", "\x12", "\x13", "\x14",
+        "\x15", "\x16", "\x17", "\x18", "\x19", "\x1a", "\x1b", "\x1c", "\x1d", "\x1e", "\x1f",
+    ];
+    const REPLACEMENTS: &'static [&'static str] = &[
+        r#"\""#,
+        r#"\\"#,
+        r#"\u0000"#,
+        r#"\u0001"#,
+        r#"\u0002"#,
+        r#"\u0003"#,
+        r#"\u0004"#,
+        r#"\u0005"#,
+        r#"\u0006"#,
+        r#"\u0007"#,
+        r#"\b"#,
+        r#"\t"#,
+        r#"\n"#,
+        r#"\u000b"#,
+        r#"\f"#,
+        r#"\r"#,
+        r#"\u000e"#,
+        r#"\u000f"#,
+        r#"\u0010"#,
+        r#"\u0011"#,
+        r#"\u0012"#,
+        r#"\u0013"#,
+        r#"\u0014"#,
+        r#"\u0015"#,
+        r#"\u0016"#,
+        r#"\u0017"#,
+        r#"\u0018"#,
+        r#"\u0019"#,
+        r#"\u001a"#,
+        r#"\u001b"#,
+        r#"\u001c"#,
+        r#"\u001d"#,
+        r#"\u001e"#,
+        r#"\u001f"#,
+    ];
+    let ac = Lazy::new(|| AhoCorasick::new_auto_configured(PATTERNS));
 
     let mut res = Cow::default();
     let mut last_start = 0usize;
-    for mat in AC.find_iter(input) {
+    for mat in ac.find_iter(input) {
         res += &input[last_start..mat.start()];
         last_start = mat.end();
         res += REPLACEMENTS[mat.pattern()];
@@ -68,18 +70,17 @@ pub(crate) fn escape(input: &str) -> Cow<str> {
 }
 
 pub(crate) fn unescape(input: &str) -> Cow<str> {
-    lazy_static! {
-        static ref PATTERNS: &'static [&'static str] =
-            &[r#"\""#, r"\\", r"\/", r"\b", r"\f", r"\n", r"\r", r"\t", r"\u"];
-        static ref REPLACEMENTS: &'static [&'static str] =
-            &["\"", "\\", "/", "\x08", "\x0c", "\x0a", "\x0d", "\x09"];
-        static ref AC: AhoCorasick = AhoCorasick::new_auto_configured(&PATTERNS);
-    }
+    const PATTERNS: &'static [&'static str] = &[
+        r#"\""#, r"\\", r"\/", r"\b", r"\f", r"\n", r"\r", r"\t", r"\u",
+    ];
+    const REPLACEMENTS: &'static [&'static str] =
+        &["\"", "\\", "/", "\x08", "\x0c", "\x0a", "\x0d", "\x09"];
+    let ac = Lazy::new(|| AhoCorasick::new_auto_configured(PATTERNS));
 
     let mut res = Cow::default();
     let mut last_start = 0usize;
     let mut vec: ArrayVec<[u16; 2]> = ArrayVec::new();
-    for mat in AC.find_iter(input) {
+    for mat in ac.find_iter(input) {
         res += &input[last_start..mat.start()];
         last_start = mat.end();
 
@@ -149,15 +150,83 @@ impl<'a, 'b: 'a> PadAdapter<'a, 'b> {
     }
 }
 
+pub(crate) fn delimited_list<I: Clone, O, O1, E: ParseError<I>, F, G>(
+    input: I,
+    item: F,
+    sep: G,
+) -> ParserIterator<I, E, impl Fn(I) -> IResult<I, O, E>>
+where
+    F: Fn(I) -> IResult<I, O, E>,
+    G: Fn(I) -> IResult<I, O1, E>,
+{
+    let parsing = Cell::new(true);
+    let parser = tuple((item, map(opt(sep), |opt| opt.is_some())));
+    iterator(input, move |input| {
+        if parsing.get() {
+            let (input, (item, has_sep)) = parser(input)?;
+            parsing.set(has_sep);
+            Ok((input, item))
+        } else {
+            Err(nom::Err::Error(E::from_error_kind(
+                input,
+                ErrorKind::Complete,
+            )))
+        }
+    })
+}
+
+pub(crate) trait ParserIteratorExt<I, E> {
+    fn process<R>(self, _: impl FnOnce(&mut Self) -> R) -> IResult<I, R, E>;
+}
+
+impl<I, E, F> ParserIteratorExt<I, E> for ParserIterator<I, E, F>
+where
+    I: Clone,
+    E: Clone,
+{
+    fn process<R>(mut self, cls: impl FnOnce(&mut Self) -> R) -> IResult<I, R, E> {
+        let r = cls(&mut self);
+        self.finish().map(|(input, _)| (input, r))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use itertools::Itertools;
+    use nom::bytes::complete::tag;
+    use nom::character::complete::{char, multispace0};
+    use nom::number::complete::double;
+    use nom::sequence::{delimitedc, preceded, terminated};
+    use proptest::collection::vec;
+    use proptest::num::f64::*;
     use proptest::prelude::*;
     use std::panic::catch_unwind;
 
+    type E<'a> = (&'a str, ErrorKind);
+
     #[test]
     fn placeholder() {}
+
+    fn parse_vector<
+        'a,
+        E: Clone + ParseError<&'a str>,
+        O,
+        F: Fn(&'a str) -> IResult<&'a str, O, E>,
+    >(
+        input: &'a str,
+        elem: F,
+    ) -> IResult<&'a str, Vec<O>, E> {
+        delimitedc(
+            input,
+            terminated(tag("["), multispace0),
+            move |input| {
+                delimited_list(input, &elem, terminated(char(','), multispace0))
+                    .process(|it| it.collect())
+            },
+            preceded(multispace0, tag("]")),
+        )
+    }
 
     proptest! {
         #[test]
@@ -176,6 +245,12 @@ mod test {
             } else {
                 prop_assert!(false);
             }
+        }
+
+        #[test]
+        fn test_delimited_list(v in vec(POSITIVE | NEGATIVE | ZERO | INFINITE, 0..=1000 as usize)) {
+            let input = format!("{:?}", v);
+            prop_assert_eq!(parse_vector::<E, _, _>(&input, double), Ok(("", v)));
         }
     }
 }
