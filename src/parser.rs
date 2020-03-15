@@ -1,7 +1,7 @@
 use crate::repr::Json;
 use crate::utils::{
-    delimited_list, into, intoc, unescape, wrap_ws, ParserIteratorExt, HIGH_SURROGATES,
-    LOW_SURROGATES,
+    delimited_list, into, intoc, unescape, with_inputc, wrap_ws, ParserIteratorExt,
+    HIGH_SURROGATES, LOW_SURROGATES,
 };
 
 use nom::branch::alt;
@@ -81,16 +81,13 @@ fn parse_false<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> 
 }
 
 fn parse_number<'a, E: ParseError<&'a str>>(input: &'a str) -> JsonResult<'a, E> {
-    let (input, num_str) = recognize_float(input)?;
-    let (_, num) = if num_str.contains(['.', 'e'].as_ref()) {
-        intoc(num_str, all_consuming(double))?
+    let (input, (num_str, num)) = with_inputc(input, double)?;
+    let json = if num_str.contains(['.', 'e'].as_ref()) {
+        num.into()
     } else {
-        alt((
-            into(map_res(rest, |s: &str| s.parse::<i64>())),
-            into(all_consuming(double)),
-        ))(num_str)?
+        num_str.parse::<i64>().map(Into::into).unwrap_or(num.into())
     };
-    Ok((input, num))
+    Ok((input, json))
 }
 
 fn hex_u16<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<'a, u16, E> {

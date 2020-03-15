@@ -5,12 +5,12 @@ use nom::character::complete::multispace0;
 use nom::combinator::{iterator, map, opt, ParserIterator};
 use nom::error::{ErrorKind, ParseError};
 use nom::sequence::{delimited, tuple};
-use nom::IResult;
+use nom::{IResult, Offset, Slice};
 use once_cell::sync::Lazy;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::fmt::{Error, Formatter, Write};
-use std::ops::Range;
+use std::ops::{Range, RangeTo};
 
 pub(crate) const HIGH_SURROGATES: Range<u16> = 0xd800..0xdc00;
 pub(crate) const LOW_SURROGATES: Range<u16> = 0xdc00..0xe000;
@@ -212,6 +212,31 @@ where
         let r = cls(&mut self);
         self.finish().map(|(input, _)| (input, r))
     }
+}
+
+pub(crate) fn with_input<I: Clone + Offset + Slice<RangeTo<usize>>, O, E: ParseError<I>, F>(
+    parser: F,
+) -> impl Fn(I) -> IResult<I, (I, O), E>
+where
+    F: Fn(I) -> IResult<I, O, E>,
+{
+    move |input| {
+        let i = input.clone();
+        parser(i).map(|(i, o)| {
+            let index = input.offset(&i);
+            (i, (input.slice(..index), o))
+        })
+    }
+}
+
+pub(crate) fn with_inputc<I: Clone + Offset + Slice<RangeTo<usize>>, O, E: ParseError<I>, F>(
+    input: I,
+    parser: F,
+) -> IResult<I, (I, O), E>
+where
+    F: Fn(I) -> IResult<I, O, E>,
+{
+    with_input(parser)(input)
 }
 
 #[cfg(test)]
