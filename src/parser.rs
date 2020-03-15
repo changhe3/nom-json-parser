@@ -13,8 +13,8 @@ use nom::combinator::*;
 use nom::error::{ErrorKind, ParseError};
 use nom::lib::std::collections::BTreeMap;
 use nom::number::complete::{double, recognize_float};
-use nom::sequence::delimitedc;
 use nom::sequence::*;
+use nom::sequence::{delimitedc, precededc};
 use nom::Err::Failure;
 use nom::{AsChar, IResult};
 use std::borrow::Cow;
@@ -128,11 +128,13 @@ fn parse_escape_seq<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<
 }
 
 fn unquote<'a, E: ParseError<&'a str>>(input: &'a str) -> ParserResult<'a, &'a str, E> {
-    delimitedc(
+    precededc(
         input,
         char('"'),
-        escaped(none_of(r#"\""#), '\\', parse_escape_seq),
-        char('"'),
+        cut(terminated(
+            escaped(none_of(r#"\""#), '\\', parse_escape_seq),
+            char('"'),
+        )),
     )
 }
 
